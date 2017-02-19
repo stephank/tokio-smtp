@@ -20,7 +20,7 @@ impl<'a> Display for XText<'a> {
             if let Some((idx, _)) = end_iter.next() {
                 rest = &end[idx..];
             } else {
-                rest = end;
+                rest = "";
             }
         }
         f.write_str(rest)
@@ -38,6 +38,7 @@ mod tests {
             ("bjorn", "bjorn"),
             ("bjørn", "bjørn"),
             ("Ø+= ❤️‰", "Ø+2B+3D+20❤️‰"),
+            ("+", "+2B"),
         ] {
             assert_eq!(format!("{}", XText(input)), expect);
         }
