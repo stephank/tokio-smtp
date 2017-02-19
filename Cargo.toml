@@ -1,7 +1,20 @@
 [package]
 name = "tokio-smtp"
+description = "An SMTP library for Tokio"
 version = "0.1.0"
 authors = ["Stéphan Kochen <stephan@kochen.nl>"]
+
+documentation = "https://docs.rs/tokio-smtp/"
+repository = "https://github.com/stephank/tokio-smtp"
+
+readme = "README.md"
+license = "MIT"
+
+keywords = ["smtp", "tokio", "email"]
+categories = ["email"]
+
+[badges]
+travis-ci = { repository = "stephank/tokio-smtp", branch = "master" }
 
 [dependencies]
 emailaddress = "^0.4"
