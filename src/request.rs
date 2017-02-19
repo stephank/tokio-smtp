@@ -212,9 +212,17 @@ mod tests {
                     params: vec![
                         MailParam::Body(MailBodyParam::EightBitMime),
                         MailParam::Size(1024),
+                        MailParam::Other {
+                            keyword: "X-FLAG".to_string(),
+                            value: None,
+                        },
+                        MailParam::Other {
+                            keyword: "X-VALUE".to_string(),
+                            value: Some("+".to_string()),
+                        },
                     ],
                 },
-                "MAIL FROM:<> BODY=8BITMIME SIZE=1024\r\n",
+                "MAIL FROM:<> BODY=8BITMIME SIZE=1024 X-FLAG X-VALUE=+2B\r\n",
             ),
             (
                 Request::Mail {
@@ -234,10 +242,17 @@ mod tests {
                 Request::Rcpt {
                     to: "".parse().unwrap(),
                     params: vec![
-                        RcptParam::Other { keyword: "FOOBAR".to_string(), value: None },
+                        RcptParam::Other {
+                            keyword: "X-FLAG".to_string(),
+                            value: None,
+                        },
+                        RcptParam::Other {
+                            keyword: "X-VALUE".to_string(),
+                            value: Some("+".to_string()),
+                        },
                     ],
                 },
-                "RCPT TO:<> FOOBAR\r\n",
+                "RCPT TO:<> X-FLAG X-VALUE=+2B\r\n",
             ),
             (
                 Request::Rcpt {
