@@ -1,3 +1,8 @@
+//! An SMTP library for [Tokio](https://tokio.rs/).
+//!
+//! Currently, just the client is implemented. Documentation can be found in
+//! [the client module](client/).
+
 // FIXME: Add server protocol
 
 extern crate emailaddress;

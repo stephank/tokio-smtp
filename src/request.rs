@@ -1,4 +1,7 @@
-//! SMTP request, containing one of several commands, and arguments
+//! Structures that model an SMTP request line.
+//!
+//! An SMTP request line consists of a command and arguments, but excludes the
+//! body (for e.g. `DATA`).
 
 // FIXME: Add parsing.
 

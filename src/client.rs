@@ -1,4 +1,89 @@
-//! SMTP client connection support
+//! The SMTP client implementation.
+//!
+//! The client is implemented as a `tokio-proto` streaming pipeline protocol.
+//!
+//! # Example
+//!
+//! ```no_run
+//! extern crate futures;
+//! extern crate tokio_core;
+//! extern crate tokio_proto;
+//! extern crate tokio_service;
+//! extern crate tokio_smtp;
+//!
+//! use futures::future;
+//! use futures::{Future, Sink};
+//! use std::net::{ToSocketAddrs};
+//! use tokio_core::reactor::{Core};
+//! use tokio_proto::streaming::{Body, Message};
+//! use tokio_service::{Service};
+//! use tokio_smtp::{Request, SmtpClient};
+//!
+//! // In this example, we grab the mail body from a fixture.
+//! const TEST_EML: &'static str = include_str!("src/fixtures/test.eml");
+//!
+//! fn main() {
+//!     // Create the event loop that will drive this server.
+//!     let mut core = Core::new().unwrap();
+//!     let handle = core.handle();
+//!
+//!     // Create a client. `SmtpClient` parameters are used in the SMTP and
+//!     // TLS handshake, but do not set the address and port to connect to.
+//!     let client = SmtpClient::localhost();
+//!
+//!     // Make a connection to an SMTP server. Here, we use the default address
+//!     // that MailHog listens on. This also takes care of TLS, if set in the
+//!     // `SmtpClient` parameters, and sends the `EHLO` command.
+//!     let addr = "localhost:1025".to_socket_addrs().unwrap().next().unwrap();
+//!     let f = client.connect(&addr, &handle)
+//!
+//!         // The future results in a service instance.
+//!         .and_then(|service| {
+//!
+//!             // Create a body sink and stream. The stream is consumed when the
+//!             // `DATA` command is sent. We asynchronously write the mail body
+//!             // to the stream by spawning another future on the core.
+//!             let (body_sender, body) = Body::pair();
+//!             handle.spawn(
+//!                 body_sender.send(Ok((TEST_EML.as_ref() as &[u8]).to_vec()))
+//!                     .map_err(|e| panic!("body send error: {:?}", e))
+//!                     .and_then(|_| future::ok(()))
+//!             );
+//!
+//!             // Following the `EHLO` handshake, send `MAIL FROM`, `RCPT TO`,
+//!             // and `DATA` with the body, then finally `QUIT`.
+//!             future::join_all(vec![
+//!                 service.call(Message::WithoutBody(Request::Mail {
+//!                     from: "john@example.test".parse().unwrap(),
+//!                     params: vec![],
+//!                 })),
+//!                 service.call(Message::WithoutBody(Request::Rcpt {
+//!                     to: "alice@example.test".parse().unwrap(),
+//!                     params: vec![],
+//!                 })),
+//!                 service.call(Message::WithBody(Request::Data.into(), body)),
+//!                 service.call(Message::WithoutBody(Request::Quit)),
+//!             ])
+//!
+//!         })
+//!
+//!         // This future results in a `Vec` of messages. Responses from
+//!         // the server are always `Message::WithoutBody`.
+//!         .and_then(move |responses| {
+//!
+//!             // Grab the `Response` from the `Message`, and print it.
+//!             for response in responses {
+//!                 println!("{:?}", response.into_inner());
+//!             }
+//!
+//!             future::ok(())
+//!
+//!         });
+//!
+//!     // Start the client on the event loop.
+//!     core.run(f).unwrap();
+//! }
+//! ```
 
 use futures::{future, Future, Stream, Sink};
 use native_tls::{Result as TlsResult, TlsConnector};
@@ -386,63 +471,5 @@ impl SmtpClient {
     /// Setup a client using custom parameters
     pub fn new(params: SmtpClientParams) -> SmtpTcpClient {
         TcpClient::new(SmtpClientProto(Arc::new(params)))
-    }
-}
-
-
-#[cfg(test)]
-mod tests {
-    use ::{SmtpClient};
-    use futures::future;
-    use futures::{Future, Sink};
-    use request::{Request};
-    use std::net::{ToSocketAddrs};
-    use tokio_core::reactor::{Core};
-    use tokio_proto::streaming::{Body, Message};
-    use tokio_service::{Service};
-
-    const TEST_EML: &'static str = include_str!("fixtures/test.eml");
-
-    #[test]
-    #[ignore]
-    fn test() {
-        let mut core = Core::new().unwrap();
-        let handle = core.handle();
-
-        let addr = "localhost:1025".to_socket_addrs().unwrap().next().unwrap();
-        let f = SmtpClient::localhost()
-            .connect(&addr, &handle)
-            .and_then(|service| {
-                let (body_sender, body) = Body::pair();
-                handle.spawn(
-                    body_sender.send(Ok((TEST_EML.as_ref() as &[u8]).to_vec()))
-                        .map_err(|e| panic!("body send error: {:?}", e))
-                        .and_then(|_| future::ok(()))
-                );
-
-                future::join_all(vec![
-                    service.call(Message::WithoutBody(Request::Mail {
-                        from: "john@example.test".parse().unwrap(),
-                        params: vec![],
-                    })),
-                    service.call(Message::WithoutBody(Request::Rcpt {
-                        to: "alice@example.test".parse().unwrap(),
-                        params: vec![],
-                    })),
-                    service.call(Message::WithBody(Request::Data.into(), body)),
-                ])
-                .and_then(move |responses| {
-                    for response in responses {
-                        println!("{:?}", response.into_inner());
-                    }
-                    service.call(Message::WithoutBody(Request::Quit))
-                })
-                .and_then(|response| {
-                    println!("{:?}", response.into_inner());
-                    future::ok(())
-                })
-            });
-
-        core.run(f).unwrap();
     }
 }

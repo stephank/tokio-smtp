@@ -1,5 +1,7 @@
-//! SMTP response, containing a mandatory return code and an optional text
-//! message
+//! Structures that model an SMTP response.
+//!
+//! An SMTP response consists of a status code, and zero or more lines of text.
+//! This module does not derive any meaning from the response text.
 
 use nom::{crlf, ErrorKind as NomErrorKind, IResult as NomResult, Needed};
 use std::fmt::{Display, Formatter, Result as FmtResult};
