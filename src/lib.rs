@@ -13,6 +13,7 @@ extern crate tokio_tls;
 mod client;
 mod request;
 mod response;
+mod util;
 
 pub use client::*;
 pub use request::*;

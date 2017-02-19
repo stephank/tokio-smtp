@@ -8,6 +8,7 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::{FromStr};
 use tokio_proto::streaming::pipeline::{Frame};
+use util::{XText};
 
 
 /// Client identifier, as sent in `EHLO`.
@@ -55,7 +56,6 @@ impl FromStr for Mailbox {
 
 impl Display for Mailbox {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        // FIXME: xtext?
         match self.0 {
             Some(ref email) => write!(f, "<{}>", email),
             None => f.write_str("<>"),
@@ -78,7 +78,7 @@ impl Display for MailParam {
             MailParam::EightBitMime => f.write_str("8BITMIME"),
             MailParam::Size(size) => write!(f, "SIZE={}", size),
             MailParam::Other { ref keyword, value: Some(ref value) } => {
-                write!(f, "{}={}", keyword, value)
+                write!(f, "{}={}", keyword, XText(value))
             },
             MailParam::Other { ref keyword, value: None } => {
                 f.write_str(keyword)
@@ -98,7 +98,7 @@ impl Display for RcptParam {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match *self {
             RcptParam::Other { ref keyword, value: Some(ref value) } => {
-                write!(f, "{}={}", keyword, value)
+                write!(f, "{}={}", keyword, XText(value))
             },
             RcptParam::Other { ref keyword, value: None } => {
                 f.write_str(keyword)
