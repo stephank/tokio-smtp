@@ -1,5 +1,7 @@
 # tokio-smtp
 
+[![Build Status](https://travis-ci.org/stephank/tokio-smtp.svg?branch=master)](https://travis-ci.org/stephank/tokio-smtp)
+
 Implementation of SMTP for [Rust] and [Tokio].
 
 [Documentation]
