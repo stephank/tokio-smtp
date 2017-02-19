@@ -67,7 +67,7 @@ impl Display for Mailbox {
 /// A `MAIL FROM` extension parameter.
 #[derive(PartialEq,Eq,Clone,Debug)]
 pub enum MailParam {
-    EightBitMime,
+    Body(MailBodyParam),
     Size(usize),
     Other { keyword: String, value: Option<String> },
 }
@@ -75,7 +75,7 @@ pub enum MailParam {
 impl Display for MailParam {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match *self {
-            MailParam::EightBitMime => f.write_str("8BITMIME"),
+            MailParam::Body(ref value) => write!(f, "BODY={}", value),
             MailParam::Size(size) => write!(f, "SIZE={}", size),
             MailParam::Other { ref keyword, value: Some(ref value) } => {
                 write!(f, "{}={}", keyword, XText(value))
@@ -83,6 +83,23 @@ impl Display for MailParam {
             MailParam::Other { ref keyword, value: None } => {
                 f.write_str(keyword)
             },
+        }
+    }
+}
+
+
+/// Values for the `BODY` parameter to `MAIL FROM`.
+#[derive(PartialEq,Eq,Clone,Debug)]
+pub enum MailBodyParam {
+    SevenBit,
+    EightBitMime,
+}
+
+impl Display for MailBodyParam {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        match *self {
+            MailBodyParam::SevenBit => f.write_str("7BIT"),
+            MailBodyParam::EightBitMime => f.write_str("8BITMIME"),
         }
     }
 }
@@ -161,7 +178,7 @@ impl From<Request> for Frame<Request, Vec<u8>, IoError> {
 
 #[cfg(test)]
 mod tests {
-    use ::{ClientId, MailParam, RcptParam, Request};
+    use ::{ClientId, MailBodyParam, MailParam, RcptParam, Request};
 
     #[test]
     fn test() {
@@ -193,10 +210,11 @@ mod tests {
                 Request::Mail {
                     from: "".parse().unwrap(),
                     params: vec![
+                        MailParam::Body(MailBodyParam::EightBitMime),
                         MailParam::Size(1024),
                     ],
                 },
-                "MAIL FROM:<> SIZE=1024\r\n",
+                "MAIL FROM:<> BODY=8BITMIME SIZE=1024\r\n",
             ),
             (
                 Request::Mail {
