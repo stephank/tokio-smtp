@@ -1,7 +1,7 @@
-//! Structures that model an SMTP response
+//! Structures that model a response
 //!
-//! An SMTP response consists of a status code, and zero or more lines of text.
-//! This module does not derive any meaning from the response text.
+//! A response consists of a status code, and zero or more lines of text. This
+//! module does not derive any meaning from the response text.
 
 use nom::{crlf, ErrorKind as NomErrorKind, IResult as NomResult, Needed};
 use std::fmt::{Display, Formatter, Result as FmtResult};
@@ -66,7 +66,7 @@ impl Display for Severity {
 #[derive(PartialEq,Eq,Copy,Clone,Debug)]
 pub enum Category {
     /// `_0_`
-    Synta_,
+    Syntax,
     /// `_1_`
     Information,
     /// `_2_`
@@ -142,7 +142,7 @@ impl Display for Detail {
 }
 
 
-/// Represents a 3 digit SMTP response code
+/// Represents a 3 digit response code
 #[derive(PartialEq,Eq,Clone,Debug)]
 pub struct Code {
     pub severity: Severity,
@@ -174,7 +174,7 @@ impl Display for Code {
 }
 
 
-/// Represents a complete SMTP response
+/// Represents a complete response
 ///
 /// The message text is optional, and may be empty.
 #[derive(PartialEq,Eq,Clone,Debug)]
@@ -190,7 +190,7 @@ impl Response {
 
     /// Returns only the first word of the message if possible
     pub fn first_word(&self) -> Option<&str> {
-        self.message.get(0).and_then(|line| line.split_whitespace().next())
+        self.text.get(0).and_then(|line| line.split_whitespace().next())
     }
 }
 
@@ -207,8 +207,8 @@ impl FromStr for Response {
 
 impl Display for Response {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        let last_idx = self.message.len() - 1;
-        for (i, line) in self.message.iter().enumerate() {
+        let last_idx = self.text.len() - 1;
+        for (i, line) in self.text.iter().enumerate() {
             let delim = if i == last_idx { ' ' } else { '-' };
             write!(f, "{}{}{}\r\n", &self.code, delim, line)?
         }
@@ -325,7 +325,7 @@ named!(parse_response<Response>,
 
             Ok(Response {
                 code: last_code,
-                message: lines.into_iter()
+                text: lines.into_iter()
                     .map(|line| from_utf8(line).map(|s| s.to_string()))
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|_| ())?,
@@ -337,7 +337,7 @@ named!(parse_response<Response>,
 
 #[cfg(test)]
 mod tests {
-    use ::{Category, Code, Detail, Response, Severity};
+    use response::{Category, Code, Detail, Response, Severity};
 
     #[test]
     fn test() {
@@ -351,7 +351,7 @@ mod tests {
                         category: Category::Connections,
                         detail: Detail(1),
                     },
-                    message: vec![
+                    text: vec![
                         "First line".to_string(),
                         "Second line".to_string(),
                         "Third line".to_string(),
@@ -367,7 +367,7 @@ mod tests {
                         category: Category::Information,
                         detail: Detail(0),
                     },
-                    message: vec![
+                    text: vec![
                         "Only line".to_string(),
                     ],
                 },
@@ -381,7 +381,7 @@ mod tests {
                         category: Category::Connections,
                         detail: Detail(9),
                     },
-                    message: vec![
+                    text: vec![
                         "Only line".to_string(),
                     ],
                 },
@@ -407,7 +407,7 @@ mod tests {
                     category: Category::Connections,
                     detail: Detail(1),
                 },
-                message: input.into_iter()
+                text: input.into_iter()
                     .map(|s| s.to_string())
                     .collect(),
             };

@@ -1,7 +1,7 @@
-//! Structures that model an SMTP request line
+//! Structures that model a request line
 //!
-//! An SMTP request line consists of a command and arguments, but excludes the
-//! body (for e.g. `DATA`).
+//! Aa request line consists of a command and arguments, but excludes the body
+//! (for e.g. `DATA`).
 
 // FIXME: Add parsing.
 
@@ -134,7 +134,7 @@ impl Display for RcptParam {
 }
 
 
-/// Represents a complete SMTP request
+/// Represents a complete request
 #[derive(PartialEq,Clone,Debug)]
 pub enum Request {
     Ehlo(ClientId),
@@ -187,7 +187,7 @@ impl From<Request> for Frame<Request, Vec<u8>, IoError> {
 
 #[cfg(test)]
 mod tests {
-    use ::{ClientId, MailBodyParam, MailParam, RcptParam, Request};
+    use request::{ClientId, MailBodyParam, MailParam, RcptParam, Request};
 
     #[test]
     fn test() {

@@ -15,11 +15,7 @@ extern crate tokio_proto;
 extern crate tokio_service;
 extern crate tokio_tls;
 
-mod client;
-mod request;
-mod response;
+pub mod client;
+pub mod request;
+pub mod response;
 mod util;
-
-pub use client::*;
-pub use request::*;
-pub use response::*;

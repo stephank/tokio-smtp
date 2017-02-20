@@ -17,7 +17,8 @@
 //! use tokio_core::reactor::{Core};
 //! use tokio_proto::streaming::{Body, Message};
 //! use tokio_service::{Service};
-//! use tokio_smtp::{Request, SmtpClient};
+//! use tokio_smtp::request::{Request as SmtpRequest};
+//! use tokio_smtp::client::{Client as SmtpClient};
 //!
 //! // In this example, we grab the mail body from a fixture.
 //! const TEST_EML: &'static str = include_str!("src/fixtures/test.eml");
@@ -27,13 +28,13 @@
 //!     let mut core = Core::new().unwrap();
 //!     let handle = core.handle();
 //!
-//!     // Create a client. `SmtpClient` parameters are used in the SMTP and
-//!     // TLS handshake, but do not set the address and port to connect to.
+//!     // Create a client. `Client` parameters are used in the SMTP and TLS
+//!     // handshake, but do not set the address and port to connect to.
 //!     let client = SmtpClient::localhost();
 //!
 //!     // Make a connection to an SMTP server. Here, we use the default address
 //!     // that MailHog listens on. This also takes care of TLS, if set in the
-//!     // `SmtpClient` parameters, and sends the `EHLO` command.
+//!     // `Client` parameters, and sends the `EHLO` command.
 //!     let addr = "localhost:1025".to_socket_addrs().unwrap().next().unwrap();
 //!     let f = client.connect(&addr, &handle)
 //!
@@ -53,16 +54,16 @@
 //!             // Following the `EHLO` handshake, send `MAIL FROM`, `RCPT TO`,
 //!             // and `DATA` with the body, then finally `QUIT`.
 //!             future::join_all(vec![
-//!                 service.call(Message::WithoutBody(Request::Mail {
+//!                 service.call(Message::WithoutBody(SmtpRequest::Mail {
 //!                     from: "john@example.test".parse().unwrap(),
 //!                     params: vec![],
 //!                 })),
-//!                 service.call(Message::WithoutBody(Request::Rcpt {
+//!                 service.call(Message::WithoutBody(SmtpRequest::Rcpt {
 //!                     to: "alice@example.test".parse().unwrap(),
 //!                     params: vec![],
 //!                 })),
-//!                 service.call(Message::WithBody(Request::Data.into(), body)),
-//!                 service.call(Message::WithoutBody(Request::Quit)),
+//!                 service.call(Message::WithBody(SmtpRequest::Data.into(), body)),
+//!                 service.call(Message::WithoutBody(SmtpRequest::Quit)),
 //!             ])
 //!
 //!         })
@@ -93,19 +94,19 @@ use response::{Response, Severity};
 use std::io::{Error as IoError, ErrorKind as IoErrorKind, Result as IoResult, Read, Write};
 use std::sync::{Arc};
 use tokio_core::io::{Codec, EasyBuf, Framed, Io};
-use tokio_proto::{TcpClient};
+use tokio_proto::{TcpClient as TokioTcpClient};
 use tokio_proto::streaming::{Body};
-use tokio_proto::streaming::pipeline::{ClientProto, Frame, StreamingPipeline};
+use tokio_proto::streaming::pipeline::{ClientProto as TokioClientProto, Frame, StreamingPipeline};
 use tokio_tls::{TlsConnectorExt, TlsStream};
 
 // FIXME: `<T: Io + 'static>`, but E0122
-pub type SmtpClientTransport<T> = Framed<SmtpClientIo<T>, SmtpClientCodec>;
-pub type SmtpClientBindTransport<T> = Box<Future<Item = SmtpClientTransport<T>, Error = IoError>>;
-pub type SmtpTcpClient = TcpClient<StreamingPipeline<Body<Vec<u8>, IoError>>, SmtpClientProto>;
+pub type ClientTransport<T> = Framed<ClientIo<T>, ClientCodec>;
+pub type ClientBindTransport<T> = Box<Future<Item = ClientTransport<T>, Error = IoError>>;
+pub type TcpClient = TokioTcpClient<StreamingPipeline<Body<Vec<u8>, IoError>>, ClientProto>;
 
 
-/// Parameters to use for secure SMTP clients
-pub struct SmtpClientTlsParams {
+/// Parameters to use for secure clients
+pub struct ClientTlsParams {
     /// A connector from `native-tls`
     pub connector: TlsConnector,
     /// The domain to send during the TLS handshake
@@ -114,39 +115,39 @@ pub struct SmtpClientTlsParams {
 
 
 /// How to apply TLS to a client connection
-pub enum SmtpClientSecurity {
+pub enum ClientSecurity {
     /// Insecure connection
     None,
     /// Use `STARTTLS`, allow rejection
-    Optional(SmtpClientTlsParams),
+    Optional(ClientTlsParams),
     /// Use `STARTTLS`, fail on rejection
-    Required(SmtpClientTlsParams),
+    Required(ClientTlsParams),
     /// Use TLS without negotation
-    Immediate(SmtpClientTlsParams),
+    Immediate(ClientTlsParams),
 }
 
 
-/// Parameters to use during the SMTP client handshake
-pub struct SmtpClientParams {
+/// Parameters to use during the client handshake
+pub struct ClientParams {
     /// Client identifier, the parameter to `EHLO`
     pub id: ClientId,
     /// Whether to use a secure connection, and how
-    pub security: SmtpClientSecurity,
+    pub security: ClientSecurity,
 }
 
 
 /// The codec used to encode client requests and decode server responses
-pub struct SmtpClientCodec {
+pub struct ClientCodec {
     escape_count: u8,
 }
 
-impl SmtpClientCodec {
+impl ClientCodec {
     pub fn new() -> Self {
-        SmtpClientCodec { escape_count: 0 }
+        ClientCodec { escape_count: 0 }
     }
 }
 
-impl Codec for SmtpClientCodec {
+impl Codec for ClientCodec {
     type Out = Frame<Request, Vec<u8>, IoError>;
     type In = Frame<Response, (), IoError>;
 
@@ -225,16 +226,16 @@ impl Codec for SmtpClientCodec {
 
 /// An `Io` implementation that wraps a secure or insecure transport into a
 /// single type.
-pub enum SmtpClientIo<T: Io + 'static> {
+pub enum ClientIo<T: Io + 'static> {
     /// Insecure transport
     Plain(T),
     /// Secure transport
     Secure(TlsStream<T>),
 }
 
-impl<T: Io + 'static> SmtpClientIo<T> {
+impl<T: Io + 'static> ClientIo<T> {
     fn unwrap_plain(self) -> T {
-        if let SmtpClientIo::Plain(io) = self {
+        if let ClientIo::Plain(io) = self {
             io
         } else {
             panic!("called unwrap_plain on non-plain stream")
@@ -242,43 +243,45 @@ impl<T: Io + 'static> SmtpClientIo<T> {
     }
 }
 
-impl<T: Io + 'static> Read for SmtpClientIo<T> {
+impl<T: Io + 'static> Read for ClientIo<T> {
     fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
         match *self {
-            SmtpClientIo::Plain(ref mut stream) => stream.read(buf),
-            SmtpClientIo::Secure(ref mut stream) => stream.read(buf),
+            ClientIo::Plain(ref mut stream) => stream.read(buf),
+            ClientIo::Secure(ref mut stream) => stream.read(buf),
         }
     }
 }
 
-impl<T: Io + 'static> Write for SmtpClientIo<T> {
+impl<T: Io + 'static> Write for ClientIo<T> {
     fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
         match *self {
-            SmtpClientIo::Plain(ref mut stream) => stream.write(buf),
-            SmtpClientIo::Secure(ref mut stream) => stream.write(buf),
+            ClientIo::Plain(ref mut stream) => stream.write(buf),
+            ClientIo::Secure(ref mut stream) => stream.write(buf),
         }
     }
 
     fn flush(&mut self) -> IoResult<()> {
         match *self {
-            SmtpClientIo::Plain(ref mut stream) => stream.flush(),
-            SmtpClientIo::Secure(ref mut stream) => stream.flush(),
+            ClientIo::Plain(ref mut stream) => stream.flush(),
+            ClientIo::Secure(ref mut stream) => stream.flush(),
         }
     }
 }
 
-impl<T: Io + 'static> Io for SmtpClientIo<T> {}
+impl<T: Io + 'static> Io for ClientIo<T> {}
 
 
-/// The Tokio client protocol implementation for SMTP
-pub struct SmtpClientProto(pub Arc<SmtpClientParams>);
+/// The Tokio client protocol implementation
+///
+/// Implements an SMTP client using a streaming pipeline protocol.
+pub struct ClientProto(pub Arc<ClientParams>);
 
 // FIXME: Can we do this with a regular function?
 // FIXME: Return opening and ehlo responses.
 macro_rules! handshake {
     ( $io:expr , $params:expr , | $stream:ident | $after_send:block ) => ({
         // Start codec.
-        $io.framed(SmtpClientCodec::new())
+        $io.framed(ClientCodec::new())
             // Send EHLO.
             .send(Request::Ehlo($params.id.clone()).into())
             // Pipeline additional messages.
@@ -298,7 +301,7 @@ macro_rules! handshake {
                 };
 
                 // Ensure it likes us, and supports ESMTP.
-                let esmtp = response.message.get(0)
+                let esmtp = response.text.get(0)
                     .and_then(|line| line.split_whitespace().nth(1));
                 if !response.code.severity.is_positive() || esmtp != Some("ESMTP") {
                     return future::err(IoError::new(
@@ -324,34 +327,33 @@ macro_rules! handshake {
     })
 }
 
-impl SmtpClientProto {
-    fn connect<T: Io + 'static>(io: T, params: Arc<SmtpClientParams>) -> SmtpClientBindTransport<T> {
+impl ClientProto {
+    fn connect<T: Io + 'static>(io: T, params: Arc<ClientParams>) -> ClientBindTransport<T> {
         match params.security {
-            SmtpClientSecurity::None => {
+            ClientSecurity::None => {
                 Self::connect_plain(io, params)
             },
-            SmtpClientSecurity::Optional(_) |
-                    SmtpClientSecurity::Required(_) => {
+            ClientSecurity::Optional(_) | ClientSecurity::Required(_) => {
                 Self::connect_starttls(io, params)
             },
-            SmtpClientSecurity::Immediate(_) => {
+            ClientSecurity::Immediate(_) => {
                 Self::connect_immediate_tls(io, params)
             },
         }
     }
 
-    fn connect_plain<T: Io + 'static>(io: T, params: Arc<SmtpClientParams>) -> SmtpClientBindTransport<T> {
+    fn connect_plain<T: Io + 'static>(io: T, params: Arc<ClientParams>) -> ClientBindTransport<T> {
         // Perform the handshake.
-        Box::new(handshake!(SmtpClientIo::Plain(io), params, |stream| {
+        Box::new(handshake!(ClientIo::Plain(io), params, |stream| {
             future::ok(stream)
         }))
     }
 
-    fn connect_starttls<T: Io + 'static>(io: T, params: Arc<SmtpClientParams>) -> SmtpClientBindTransport<T> {
+    fn connect_starttls<T: Io + 'static>(io: T, params: Arc<ClientParams>) -> ClientBindTransport<T> {
         let is_required =
-            if let SmtpClientSecurity::Required(_) = params.security { true } else { false };
+            if let ClientSecurity::Required(_) = params.security { true } else { false };
         // Perform the handshake, and send STARTTLS.
-        Box::new(handshake!(SmtpClientIo::Plain(io), params, |stream| {
+        Box::new(handshake!(ClientIo::Plain(io), params, |stream| {
             stream.send(Request::StartTls.into())
         })
             // Receive STARTTLS response.
@@ -382,8 +384,8 @@ impl SmtpClientProto {
                 {
                     let io = stream.into_inner().unwrap_plain();
                     let tls_params = match params.security {
-                        SmtpClientSecurity::Optional(ref tls_params) |
-                                SmtpClientSecurity::Required(ref tls_params) => tls_params,
+                        ClientSecurity::Optional(ref tls_params) |
+                                ClientSecurity::Required(ref tls_params) => tls_params,
                         _ => panic!("bad params to connect_starttls"),
                     };
                     tls_params.connector.connect_async(&tls_params.sni_domain, io)
@@ -391,19 +393,19 @@ impl SmtpClientProto {
                 }
                     .and_then(move |io| {
                         // Re-do the handshake.
-                        handshake!(SmtpClientIo::Secure(io), params, |stream| {
+                        handshake!(ClientIo::Secure(io), params, |stream| {
                             future::ok(stream)
                         })
                     })
             }))
     }
 
-    fn connect_immediate_tls<T: Io + 'static>(io: T, params: Arc<SmtpClientParams>) -> SmtpClientBindTransport<T> {
+    fn connect_immediate_tls<T: Io + 'static>(io: T, params: Arc<ClientParams>) -> ClientBindTransport<T> {
         // Start TLS on the `Io` first.
         // The block is to ensure the lifetime of `params.
         Box::new({
             let tls_params = match params.security {
-                SmtpClientSecurity::Immediate(ref tls_params) => tls_params,
+                ClientSecurity::Immediate(ref tls_params) => tls_params,
                 _ => panic!("bad params to connect_immediate_tls"),
             };
             tls_params.connector.connect_async(&tls_params.sni_domain, io)
@@ -411,21 +413,21 @@ impl SmtpClientProto {
         }
             .and_then(move |io| {
                 // Perform the handshake.
-                handshake!(SmtpClientIo::Secure(io), params, |stream| {
+                handshake!(ClientIo::Secure(io), params, |stream| {
                     future::ok(stream)
                 })
             }))
     }
 }
 
-impl<T: Io + 'static> ClientProto<T> for SmtpClientProto {
+impl<T: Io + 'static> TokioClientProto<T> for ClientProto {
     type Request = Request;
     type RequestBody = Vec<u8>;
     type Response = Response;
     type ResponseBody = ();
     type Error = IoError;
-    type Transport = SmtpClientTransport<T>;
-    type BindTransport = SmtpClientBindTransport<T>;
+    type Transport = ClientTransport<T>;
+    type BindTransport = ClientBindTransport<T>;
 
     fn bind_transport(&self, io: T) -> Self::BindTransport {
         Self::connect(io, self.0.clone())
@@ -437,26 +439,26 @@ impl<T: Io + 'static> ClientProto<T> for SmtpClientProto {
 ///
 /// This unit struct itself serves no real purpose, but contains constructor
 /// methods for creating a `TcpClient` set up with the SMTP protocol.
-pub struct SmtpClient;
+pub struct Client;
 
-impl SmtpClient {
+impl Client {
     /// Setup a client for connecting to the local server
-    pub fn localhost() -> SmtpTcpClient {
+    pub fn localhost() -> TcpClient {
         Self::insecure(ClientId::Domain("localhost".to_string()))
     }
 
     /// Setup a client for connecting without TLS
-    pub fn insecure(id: ClientId) -> SmtpTcpClient {
-        Self::new(SmtpClientParams {
-            security: SmtpClientSecurity::None,
+    pub fn insecure(id: ClientId) -> TcpClient {
+        Self::new(ClientParams {
+            security: ClientSecurity::None,
             id: id,
         })
     }
 
     /// Setup a client for connecting with TLS using STARTTLS
-    pub fn secure(id: ClientId, sni_domain: String) -> TlsResult<SmtpTcpClient> {
-        Ok(Self::new(SmtpClientParams {
-            security: SmtpClientSecurity::Required(SmtpClientTlsParams {
+    pub fn secure(id: ClientId, sni_domain: String) -> TlsResult<TcpClient> {
+        Ok(Self::new(ClientParams {
+            security: ClientSecurity::Required(ClientTlsParams {
                 connector: TlsConnector::builder()
                     .and_then(|builder| builder.build())?,
                 sni_domain: sni_domain,
@@ -466,9 +468,9 @@ impl SmtpClient {
     }
 
     /// Setup a client for connecting with TLS on a secure port
-    pub fn secure_port(id: ClientId, sni_domain: String) -> TlsResult<SmtpTcpClient> {
-        Ok(Self::new(SmtpClientParams {
-            security: SmtpClientSecurity::Immediate(SmtpClientTlsParams {
+    pub fn secure_port(id: ClientId, sni_domain: String) -> TlsResult<TcpClient> {
+        Ok(Self::new(ClientParams {
+            security: ClientSecurity::Immediate(ClientTlsParams {
                 connector: TlsConnector::builder()
                     .and_then(|builder| builder.build())?,
                 sni_domain: sni_domain,
@@ -478,7 +480,7 @@ impl SmtpClient {
     }
 
     /// Setup a client using custom parameters
-    pub fn new(params: SmtpClientParams) -> SmtpTcpClient {
-        TcpClient::new(SmtpClientProto(Arc::new(params)))
+    pub fn new(params: ClientParams) -> TcpClient {
+        TokioTcpClient::new(ClientProto(Arc::new(params)))
     }
 }
