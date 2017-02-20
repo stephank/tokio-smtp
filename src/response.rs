@@ -341,7 +341,7 @@ named!(parse_response<Response>,
 
 
 #[cfg(test)]
-mod test {
+mod tests {
     use ::{Category, Code, Detail, Response, Severity};
 
     #[test]
