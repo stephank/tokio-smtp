@@ -1,4 +1,4 @@
-//! Structures that model an SMTP response.
+//! Structures that model an SMTP response
 //!
 //! An SMTP response consists of a status code, and zero or more lines of text.
 //! This module does not derive any meaning from the response text.
@@ -8,16 +8,16 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::str::{FromStr, from_utf8};
 
 
-/// First digit indicates severity
+/// The severity of a response code (first digit)
 #[derive(PartialEq,Eq,Copy,Clone,Debug)]
 pub enum Severity {
-    /// 2yx
+    /// `2__`
     PositiveCompletion,
-    /// 3yz
+    /// `3__`
     PositiveIntermediate,
-    /// 4yz
+    /// `4__`
     TransientNegativeCompletion,
-    /// 5yz
+    /// `5__`
     PermanentNegativeCompletion,
 }
 
@@ -62,20 +62,20 @@ impl Display for Severity {
 }
 
 
-/// Second digit indicates category
+/// The category of a response code (second digit)
 #[derive(PartialEq,Eq,Copy,Clone,Debug)]
 pub enum Category {
-    /// x0z
-    Syntax,
-    /// x1z
+    /// `_0_`
+    Synta_,
+    /// `_1_`
     Information,
-    /// x2z
+    /// `_2_`
     Connections,
-    /// x3z
+    /// `_3_`
     Unspecified3,
-    /// x4z
+    /// `_4_`
     Unspecified4,
-    /// x5z
+    /// `_5_`
     MailSystem,
 }
 
@@ -114,7 +114,7 @@ impl Display for Category {
 }
 
 
-/// Third digit indicates detail
+/// The detail digit of a response code (third digit)
 #[derive(PartialEq,Eq,Clone,Debug)]
 pub struct Detail(pub u8);
 
@@ -145,11 +145,8 @@ impl Display for Detail {
 /// Represents a 3 digit SMTP response code
 #[derive(PartialEq,Eq,Clone,Debug)]
 pub struct Code {
-    /// First digit of the response code
     pub severity: Severity,
-    /// Second digit of the response code
     pub category: Category,
-    /// Third digit of the response code
     pub detail: Detail,
 }
 
@@ -177,15 +174,13 @@ impl Display for Code {
 }
 
 
-/// An SMTP reply, with separate code and message
+/// Represents a complete SMTP response
 ///
-/// The text message is optional, and may be empty
+/// The message text is optional, and may be empty.
 #[derive(PartialEq,Eq,Clone,Debug)]
 pub struct Response {
-    /// Response code
     pub code: Code,
-    /// Server response text
-    pub message: Vec<String>,
+    pub text: Vec<String>,
 }
 
 impl Response {

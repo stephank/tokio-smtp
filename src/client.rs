@@ -104,34 +104,38 @@ pub type SmtpClientBindTransport<T> = Box<Future<Item = SmtpClientTransport<T>, 
 pub type SmtpTcpClient = TcpClient<StreamingPipeline<Body<Vec<u8>, IoError>>, SmtpClientProto>;
 
 
-/// TLS parameters used by secure clients
+/// Parameters to use for secure SMTP clients
 pub struct SmtpClientTlsParams {
+    /// A connector from `native-tls`
     pub connector: TlsConnector,
+    /// The domain to send during the TLS handshake
     pub sni_domain: String,
 }
 
 
-/// How to apply TLS to the connection
+/// How to apply TLS to a client connection
 pub enum SmtpClientSecurity {
     /// Insecure connection
     None,
-    /// Use STARTTLS, allow rejection
+    /// Use `STARTTLS`, allow rejection
     Optional(SmtpClientTlsParams),
-    /// Use STARTTLS, fail on rejection
+    /// Use `STARTTLS`, fail on rejection
     Required(SmtpClientTlsParams),
     /// Use TLS without negotation
     Immediate(SmtpClientTlsParams),
 }
 
 
-/// SMTP client parameters
+/// Parameters to use during the SMTP client handshake
 pub struct SmtpClientParams {
+    /// Client identifier, the parameter to `EHLO`
     pub id: ClientId,
+    /// Whether to use a secure connection, and how
     pub security: SmtpClientSecurity,
 }
 
 
-/// SMTP codec for encoding client requests and decoding server responses
+/// The codec used to encode client requests and decode server responses
 pub struct SmtpClientCodec {
     escape_count: u8,
 }
@@ -219,10 +223,12 @@ impl Codec for SmtpClientCodec {
 }
 
 
-/// An Io implementation that allows to wrap secure and insecure transports
-/// into a single type.
+/// An `Io` implementation that wraps a secure or insecure transport into a
+/// single type.
 pub enum SmtpClientIo<T: Io + 'static> {
+    /// Insecure transport
     Plain(T),
+    /// Secure transport
     Secure(TlsStream<T>),
 }
 
@@ -264,7 +270,7 @@ impl<T: Io + 'static> Write for SmtpClientIo<T> {
 impl<T: Io + 'static> Io for SmtpClientIo<T> {}
 
 
-/// SMTP client protocol implementation
+/// The Tokio client protocol implementation for SMTP
 pub struct SmtpClientProto(pub Arc<SmtpClientParams>);
 
 // FIXME: Can we do this with a regular function?
@@ -427,7 +433,10 @@ impl<T: Io + 'static> ClientProto<T> for SmtpClientProto {
 }
 
 
-/// SMTP client connector
+/// Utility for creating a `TcpClient`
+///
+/// This unit struct itself serves no real purpose, but contains constructor
+/// methods for creating a `TcpClient` set up with the SMTP protocol.
 pub struct SmtpClient;
 
 impl SmtpClient {

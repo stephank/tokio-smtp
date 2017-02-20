@@ -1,4 +1,4 @@
-//! Structures that model an SMTP request line.
+//! Structures that model an SMTP request line
 //!
 //! An SMTP request line consists of a command and arguments, but excludes the
 //! body (for e.g. `DATA`).
@@ -14,12 +14,16 @@ use tokio_proto::streaming::pipeline::{Frame};
 use util::{XText};
 
 
-/// Client identifier, as sent in `EHLO`.
+/// Client identifier, the parameter to `EHLO`
 #[derive(PartialEq,Eq,Clone,Debug)]
 pub enum ClientId {
+    /// A fully-qualified domain name
     Domain(String),
+    /// An IPv4 address
     Ipv4(Ipv4Addr),
+    /// An IPv6 address
     Ipv6(Ipv6Addr),
+    /// A custom identifier
     Other { tag: String, value: String },
 }
 
@@ -35,7 +39,7 @@ impl Display for ClientId {
 }
 
 
-/// A mailbox specified in `MAIL FROM` or `RCPT TO`.
+/// A mailbox specified in `MAIL FROM` or `RCPT TO`
 #[derive(PartialEq,Clone,Debug)]
 pub struct Mailbox(pub Option<EmailAddress>);
 
@@ -67,7 +71,7 @@ impl Display for Mailbox {
 }
 
 
-/// A `MAIL FROM` extension parameter.
+/// A `MAIL FROM` extension parameter
 #[derive(PartialEq,Eq,Clone,Debug)]
 pub enum MailParam {
     Body(MailBodyParam),
@@ -91,10 +95,12 @@ impl Display for MailParam {
 }
 
 
-/// Values for the `BODY` parameter to `MAIL FROM`.
+/// Values for the `BODY` parameter to `MAIL FROM`
 #[derive(PartialEq,Eq,Clone,Debug)]
 pub enum MailBodyParam {
+    /// `7BIT`
     SevenBit,
+    /// `8BITMIME`
     EightBitMime,
 }
 
@@ -108,7 +114,7 @@ impl Display for MailBodyParam {
 }
 
 
-/// A `RCPT TO` extension parameter.
+/// A `RCPT TO` extension parameter
 #[derive(PartialEq,Eq,Clone,Debug)]
 pub enum RcptParam {
     Other { keyword: String, value: Option<String> },
@@ -128,7 +134,7 @@ impl Display for RcptParam {
 }
 
 
-/// A complete SMTP request.
+/// Represents a complete SMTP request
 #[derive(PartialEq,Clone,Debug)]
 pub enum Request {
     Ehlo(ClientId),
