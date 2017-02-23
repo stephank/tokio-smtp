@@ -1,6 +1,8 @@
 //! The SMTP client implementation.
 //!
-//! The client is implemented as a `tokio-proto` streaming pipeline protocol.
+//! The client is implemented as a [tokio-proto] streaming pipeline protocol.
+//!
+//!  [tokio-proto]: https://docs.rs/tokio-proto/
 //!
 //! # Example
 //!
@@ -62,7 +64,7 @@
 //!                     to: "alice@example.test".parse().unwrap(),
 //!                     params: vec![],
 //!                 })),
-//!                 service.call(Message::WithBody(SmtpRequest::Data.into(), body)),
+//!                 service.call(Message::WithBody(SmtpRequest::Data, body)),
 //!                 service.call(Message::WithoutBody(SmtpRequest::Quit)),
 //!             ])
 //!
@@ -70,7 +72,7 @@
 //!
 //!         // This future results in a `Vec` of messages. Responses from
 //!         // the server are always `Message::WithoutBody`.
-//!         .and_then(move |responses| {
+//!         .and_then(|responses| {
 //!
 //!             // Grab the `Response` from the `Message`, and print it.
 //!             for response in responses {
