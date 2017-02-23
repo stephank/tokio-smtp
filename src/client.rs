@@ -180,8 +180,14 @@ impl Codec for ClientCodec {
                 buf.write_all(&chunk[start..])
             },
             Frame::Body { chunk: None } => {
+                match self.escape_count {
+                    0 => buf.write_all(b"\r\n.\r\n")?,
+                    1 => buf.write_all(b"\n.\r\n")?,
+                    2 => buf.write_all(b".\r\n")?,
+                    _ => unreachable!(),
+                }
                 self.escape_count = 0;
-                buf.write_all(b".\r\n")
+                Ok(())
             },
             Frame::Error { error } => {
                 panic!("unimplemented error handling: {:?}", error);
