@@ -139,13 +139,14 @@ pub struct ClientParams {
 
 
 /// The codec used to encode client requests and decode server responses
+#[derive(Default)]
 pub struct ClientCodec {
     escape_count: u8,
 }
 
 impl ClientCodec {
     pub fn new() -> Self {
-        ClientCodec { escape_count: 0 }
+        ClientCodec::default()
     }
 }
 
@@ -451,7 +452,7 @@ impl Client {
 
     /// Setup a client for connecting without TLS
     pub fn insecure(id: ClientId) -> TcpClient {
-        Self::new(ClientParams {
+        Self::with_params(ClientParams {
             security: ClientSecurity::None,
             id: id,
         })
@@ -459,7 +460,7 @@ impl Client {
 
     /// Setup a client for connecting with TLS using STARTTLS
     pub fn secure(id: ClientId, sni_domain: String) -> TlsResult<TcpClient> {
-        Ok(Self::new(ClientParams {
+        Ok(Self::with_params(ClientParams {
             security: ClientSecurity::Required(ClientTlsParams {
                 connector: TlsConnector::builder()
                     .and_then(|builder| builder.build())?,
@@ -471,7 +472,7 @@ impl Client {
 
     /// Setup a client for connecting with TLS on a secure port
     pub fn secure_port(id: ClientId, sni_domain: String) -> TlsResult<TcpClient> {
-        Ok(Self::new(ClientParams {
+        Ok(Self::with_params(ClientParams {
             security: ClientSecurity::Immediate(ClientTlsParams {
                 connector: TlsConnector::builder()
                     .and_then(|builder| builder.build())?,
@@ -482,7 +483,7 @@ impl Client {
     }
 
     /// Setup a client using custom parameters
-    pub fn new(params: ClientParams) -> TcpClient {
+    pub fn with_params(params: ClientParams) -> TcpClient {
         TokioTcpClient::new(ClientProto(Arc::new(params)))
     }
 }

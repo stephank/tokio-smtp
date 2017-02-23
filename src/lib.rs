@@ -196,8 +196,8 @@ impl MailerBuilder {
                     None => ClientSecurity::None,
                     Some(connector) => ClientSecurity::Required(ClientTlsParams {
                         connector: connector,
-                        sni_domain: self.server.rsplitn(2, ":")
-                            .skip(1).next().unwrap().to_string(),
+                        sni_domain: self.server.rsplitn(2, ':')
+                            .nth(1).unwrap().to_string(),
                     }),
                 },
             }),
