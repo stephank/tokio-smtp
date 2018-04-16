@@ -290,7 +290,7 @@ named!(parse_response<Response>,
                 tuple!(
                     parse_code,
                     preceded!(
-                        char!(b'-'),
+                        char!('-'),
                         take_until_and_consume!(b"\r\n".as_ref())
                     )
                 )
@@ -301,7 +301,7 @@ named!(parse_response<Response>,
                 terminated!(
                     opt!(
                         preceded!(
-                            char!(b' '),
+                            char!(' '),
                             take_until!(b"\r\n".as_ref())
                         )
                     ),
