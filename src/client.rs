@@ -23,7 +23,7 @@
 //! use tokio_smtp::client::{Client as SmtpClient};
 //!
 //! // In this example, we grab the mail body from a fixture.
-//! const TEST_EML: &'static str = include_str!("src/fixtures/test.eml");
+//! const TEST_EML: &'static str = include_str!("fixtures/test.eml");
 //!
 //! fn main() {
 //!     // Create the event loop that will drive this server.
