@@ -88,14 +88,16 @@
 //! }
 //! ```
 
-use futures::{future, Future, Stream, Sink};
+use futures::{future, Future, Stream, Sink, Poll};
 use native_tls::{Result as TlsResult, TlsConnector};
 use nom::{IResult as NomResult};
 use request::{ClientId, Request};
 use response::{Response, Severity};
 use std::io::{Error as IoError, ErrorKind as IoErrorKind, Result as IoResult, Read, Write};
 use std::sync::{Arc};
-use tokio_core::io::{Codec, EasyBuf, Framed, Io};
+use bytes::{BufMut, BytesMut};
+use tokio_io::{AsyncRead, AsyncWrite};
+use tokio_io::codec::{Encoder, Decoder, Framed};
 use tokio_proto::{TcpClient as TokioTcpClient};
 use tokio_proto::streaming::{Body};
 use tokio_proto::streaming::pipeline::{ClientProto as TokioClientProto, Frame, StreamingPipeline};
@@ -150,14 +152,14 @@ impl ClientCodec {
     }
 }
 
-impl Codec for ClientCodec {
-    type Out = Frame<Request, Vec<u8>, IoError>;
-    type In = Frame<Response, (), IoError>;
+impl Encoder for ClientCodec {
+    type Item = Frame<Request, Vec<u8>, IoError>;
+    type Error = IoError;
 
-    fn encode(&mut self, frame: Self::Out, buf: &mut Vec<u8>) -> IoResult<()> {
+    fn encode(&mut self, frame: Self::Item, buf: &mut BytesMut) -> IoResult<()> {
         match frame {
             Frame::Message { message, .. } => {
-                buf.write_all(message.to_string().as_bytes())
+                buf.put_slice(message.to_string().as_bytes());
             },
             Frame::Body { chunk: Some(chunk) } => {
                 // Escape lines starting with a '.'
@@ -172,33 +174,38 @@ impl Codec for ClientCodec {
                     }
                     if self.escape_count == 3 {
                         self.escape_count = 0;
-                        buf.write_all(&chunk[start..idx])?;
-                        buf.write_all(b".")?;
+                        buf.put_slice(&chunk[start..idx]);
+                        buf.put_slice(b".");
                         start = idx;
                     }
                 }
-                buf.write_all(&chunk[start..])
+                buf.put_slice(&chunk[start..]);
             },
             Frame::Body { chunk: None } => {
                 match self.escape_count {
-                    0 => buf.write_all(b"\r\n.\r\n")?,
-                    1 => buf.write_all(b"\n.\r\n")?,
-                    2 => buf.write_all(b".\r\n")?,
+                    0 => buf.put_slice(b"\r\n.\r\n"),
+                    1 => buf.put_slice(b"\n.\r\n"),
+                    2 => buf.put_slice(b".\r\n"),
                     _ => unreachable!(),
                 }
                 self.escape_count = 0;
-                Ok(())
             },
             Frame::Error { error } => {
                 panic!("unimplemented error handling: {:?}", error);
             },
         }
+        Ok(())
     }
+}
 
-    fn decode(&mut self, buf: &mut EasyBuf) -> IoResult<Option<Self::In>> {
+impl Decoder for ClientCodec {
+    type Item = Frame<Response, (), IoError>;
+    type Error = IoError;
+    
+    fn decode(&mut self, buf: &mut BytesMut) -> IoResult<Option<Self::Item>> {
         let mut bytes: usize = 0;
 
-        let res = match Response::parse(buf.as_slice()) {
+        let res = match Response::parse(buf.as_ref()) {
             NomResult::Done(rest, res) => {
                 // Calculate how much data to drain.
                 bytes = buf.len() - rest.len();
@@ -220,7 +227,7 @@ impl Codec for ClientCodec {
 
         // Drain parsed data.
         if bytes != 0 {
-            buf.drain_to(bytes);
+            buf.split_to(bytes);
 
             // If we dropped the message, try to parse the remaining data.
             if let Ok(None) = res {
@@ -235,14 +242,14 @@ impl Codec for ClientCodec {
 
 /// An `Io` implementation that wraps a secure or insecure transport into a
 /// single type.
-pub enum ClientIo<T: Io + 'static> {
+pub enum ClientIo<T> {
     /// Insecure transport
     Plain(T),
     /// Secure transport
     Secure(TlsStream<T>),
 }
 
-impl<T: Io + 'static> ClientIo<T> {
+impl<T> ClientIo<T> {
     fn unwrap_plain(self) -> T {
         if let ClientIo::Plain(io) = self {
             io
@@ -252,7 +259,7 @@ impl<T: Io + 'static> ClientIo<T> {
     }
 }
 
-impl<T: Io + 'static> Read for ClientIo<T> {
+impl<T: AsyncRead + 'static> Read for ClientIo<T> where TlsStream<T>: Read {
     fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
         match *self {
             ClientIo::Plain(ref mut stream) => stream.read(buf),
@@ -261,7 +268,7 @@ impl<T: Io + 'static> Read for ClientIo<T> {
     }
 }
 
-impl<T: Io + 'static> Write for ClientIo<T> {
+impl<T: AsyncWrite + 'static> Write for ClientIo<T> where TlsStream<T>: Write {
     fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
         match *self {
             ClientIo::Plain(ref mut stream) => stream.write(buf),
@@ -277,8 +284,15 @@ impl<T: Io + 'static> Write for ClientIo<T> {
     }
 }
 
-impl<T: Io + 'static> Io for ClientIo<T> {}
-
+impl<T: AsyncRead + 'static> AsyncRead for ClientIo<T> where TlsStream<T>: AsyncRead + Read {}
+impl<T: AsyncWrite + 'static> AsyncWrite for ClientIo<T> where TlsStream<T>: AsyncWrite + Write {
+    fn shutdown(&mut self) -> Poll<(), IoError> {
+        match self {
+            &mut ClientIo::Plain(ref mut t) => t.shutdown(),
+            &mut ClientIo::Secure(ref mut t) => t.shutdown(),
+        }
+    }
+}
 
 /// The Tokio client protocol implementation
 ///
@@ -337,7 +351,7 @@ macro_rules! handshake {
 }
 
 impl ClientProto {
-    fn connect<T: Io + 'static>(io: T, params: Arc<ClientParams>) -> ClientBindTransport<T> {
+    fn connect<T: AsyncRead + AsyncWrite + 'static>(io: T, params: Arc<ClientParams>) -> ClientBindTransport<T> {
         match params.security {
             ClientSecurity::None => {
                 Self::connect_plain(io, params)
@@ -351,14 +365,14 @@ impl ClientProto {
         }
     }
 
-    fn connect_plain<T: Io + 'static>(io: T, params: Arc<ClientParams>) -> ClientBindTransport<T> {
+    fn connect_plain<T: AsyncRead + AsyncWrite + 'static>(io: T, params: Arc<ClientParams>) -> ClientBindTransport<T> {
         // Perform the handshake.
         Box::new(handshake!(ClientIo::Plain(io), params, |stream| {
             future::ok(stream)
         }))
     }
 
-    fn connect_starttls<T: Io + 'static>(io: T, params: Arc<ClientParams>) -> ClientBindTransport<T> {
+    fn connect_starttls<T: AsyncRead + AsyncWrite + 'static>(io: T, params: Arc<ClientParams>) -> ClientBindTransport<T> {
         let is_required =
             if let ClientSecurity::Required(_) = params.security { true } else { false };
         // Perform the handshake, and send STARTTLS.
@@ -409,7 +423,7 @@ impl ClientProto {
             }))
     }
 
-    fn connect_immediate_tls<T: Io + 'static>(io: T, params: Arc<ClientParams>) -> ClientBindTransport<T> {
+    fn connect_immediate_tls<T: AsyncRead + AsyncWrite + 'static>(io: T, params: Arc<ClientParams>) -> ClientBindTransport<T> {
         // Start TLS on the `Io` first.
         // The block is to ensure the lifetime of `params.
         Box::new({
@@ -429,7 +443,7 @@ impl ClientProto {
     }
 }
 
-impl<T: Io + 'static> TokioClientProto<T> for ClientProto {
+impl<T: AsyncRead + AsyncWrite + 'static> TokioClientProto<T> for ClientProto {
     type Request = Request;
     type RequestBody = Vec<u8>;
     type Response = Response;
