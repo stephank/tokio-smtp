@@ -344,7 +344,32 @@ macro_rules! handshake {
                     return future::err(IoError::new(
                         IoErrorKind::InvalidData, "connection closed during handshake"))
                 }
+                
+                future::ok(stream)
+            })
+    })
+}
 
+macro_rules! handshake_starttls {
+    ( $io:expr , $params:expr , | $stream:ident | $after_send:block ) => ({
+        // Start codec.
+        $io.framed(ClientCodec::new())
+            // Send EHLO.
+            .send(Request::Ehlo($params.id.clone()).into())
+            // Pipeline additional messages.
+            .and_then(|$stream| $after_send)
+            // Receive EHLO response.
+            .and_then(|stream| {
+                stream.into_future()
+                    .map_err(|(err, _)| err)
+            })
+            .and_then(|(response, stream)| {
+                // Fail if closed.
+                if response.is_none() {
+                    return future::err(IoError::new(
+                        IoErrorKind::InvalidData, "connection closed during handshake"))
+                }
+                
                 future::ok(stream)
             })
     })
@@ -416,7 +441,7 @@ impl ClientProto {
                 }
                     .and_then(move |io| {
                         // Re-do the handshake.
-                        handshake!(ClientIo::Secure(io), params, |stream| {
+                        handshake_starttls!(ClientIo::Secure(io), params, |stream| {
                             future::ok(stream)
                         })
                     })
