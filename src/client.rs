@@ -32,7 +32,7 @@
 //!
 //!     // Create a client. `Client` parameters are used in the SMTP and TLS
 //!     // handshake, but do not set the address and port to connect to.
-//!     let client = SmtpClient::localhost();
+//!     let client = SmtpClient::localhost(None);
 //!
 //!     // Make a connection to an SMTP server. Here, we use the default address
 //!     // that MailHog listens on. This also takes care of TLS, if set in the
