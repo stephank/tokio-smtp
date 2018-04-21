@@ -55,6 +55,8 @@ extern crate tokio_proto;
 extern crate tokio_service;
 extern crate tokio_io;
 extern crate tokio_tls;
+#[macro_use]
+extern crate log;
 
 pub mod client;
 pub mod request;
@@ -62,8 +64,7 @@ pub mod response;
 mod util;
 
 use client::{ClientParams, ClientProto, ClientSecurity, ClientTlsParams};
-use futures::future;
-use futures::{Future, Sink};
+use futures::{future, Future, Sink};
 use native_tls::{TlsConnector};
 use request::{ClientId, Mailbox, Request as SmtpRequest};
 use std::io::{Error as IoError, ErrorKind as IoErrorKind, Result as IoResult};

@@ -157,6 +157,7 @@ impl Encoder for ClientCodec {
     type Error = IoError;
 
     fn encode(&mut self, frame: Self::Item, buf: &mut BytesMut) -> IoResult<()> {
+        debug!("C: {:?}", &frame);
         match frame {
             Frame::Message { message, .. } => {
                 buf.put_slice(message.to_string().as_bytes());
@@ -214,7 +215,9 @@ impl Decoder for ClientCodec {
                 if res.code.severity == Severity::PositiveIntermediate {
                     Ok(None)
                 } else {
-                    Ok(Some(Frame::Message { message: res, body: false }))
+                    let frame = Frame::Message { message: res, body: false };
+                    debug!("S: {:?}", &frame);
+                    Ok(Some(frame))
                 }
             },
             NomResult::Incomplete(_) => {
