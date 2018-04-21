@@ -18,6 +18,7 @@ travis-ci = { repository = "stephank/tokio-smtp", branch = "master" }
 
 [dependencies]
 emailaddress = "^0.4"
+base64 = "^0.9"
 futures = "^0.1"
 bytes = "^0.4"
 native-tls = "^0.1"

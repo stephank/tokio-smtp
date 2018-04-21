@@ -45,6 +45,7 @@
 // FIXME: Add server protocol
 
 extern crate emailaddress;
+extern crate base64;
 extern crate futures;
 extern crate native_tls;
 #[macro_use]
@@ -63,7 +64,7 @@ pub mod request;
 pub mod response;
 mod util;
 
-use client::{ClientParams, ClientProto, ClientSecurity, ClientTlsParams};
+use client::{ClientParams, ClientAuth, ClientProto, ClientSecurity, ClientTlsParams};
 use futures::{future, Future, Sink};
 use native_tls::{TlsConnector};
 use request::{ClientId, Mailbox, Request as SmtpRequest};
@@ -154,6 +155,7 @@ impl Mailer {
 pub struct MailerBuilder {
     server: String,
     client_id: ClientId,
+    client_auth: Option<ClientAuth>,
     tls_connector: Option<TlsConnector>,
 }
 
@@ -161,8 +163,9 @@ impl MailerBuilder {
     /// Create a builder.
     pub fn new(server: String) -> Self {
         MailerBuilder {
-            server: server,
+            server,
             client_id: ClientId::Domain("localhost".to_string()),
+            client_auth: None,
             tls_connector: None,
         }
     }
@@ -177,6 +180,15 @@ impl MailerBuilder {
     /// By default, this is `localhost`.
     pub fn set_client_id(mut self, client_id: ClientId) -> Self {
         self.client_id = client_id;
+        self
+    }
+
+    /// Set the client authentication parameters
+    ///
+    /// By default, no authentication data is set.
+    /// Many smtp services requires a valid user authentication to be able to send mail.
+    pub fn set_client_auth(mut self, client_auth: ClientAuth) -> Self {
+        self.client_auth = Some(client_auth);
         self
     }
 
@@ -195,6 +207,7 @@ impl MailerBuilder {
             addrs: addrs,
             params: Arc::new(ClientParams {
                 id: self.client_id,
+                auth: self.client_auth,
                 security: match self.tls_connector {
                     None => ClientSecurity::None,
                     Some(connector) => ClientSecurity::Required(ClientTlsParams {

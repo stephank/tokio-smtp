@@ -139,6 +139,7 @@ impl Display for RcptParam {
 pub enum Request {
     Ehlo(ClientId),
     StartTls,
+    Auth { method: Option<String>, data: Option<String> },
     Mail { from: Mailbox, params: Vec<MailParam> },
     Rcpt { to: Mailbox, params: Vec<RcptParam> },
     Data,
@@ -150,6 +151,17 @@ impl Display for Request {
         match *self {
             Request::Ehlo(ref id) => write!(f, "EHLO {}\r\n", id),
             Request::StartTls => write!(f, "STARTTLS\r\n"),
+            Request::Auth { ref method, ref data } => {
+                match (method, data) {
+                    (&Some(ref method), &Some(ref data)) =>
+                        write!(f, "AUTH {} {}\r\n", method, data),
+                    (&Some(ref method), &None) =>
+                        write!(f, "AUTH {}\r\n", method),
+                    (&None, &Some(ref data)) =>
+                        write!(f, "{}\r\n", data),
+                    _ => Ok(()),
+                }
+            },
             Request::Mail { ref from, ref params } => {
                 write!(f, "MAIL FROM:{}", from)?;
                 for param in params {

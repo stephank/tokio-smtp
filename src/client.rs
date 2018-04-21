@@ -88,6 +88,7 @@
 //! }
 //! ```
 
+use base64;
 use futures::{future, Future, Stream, Sink, Poll};
 use native_tls::{Result as TlsResult, TlsConnector};
 use nom::{IResult as NomResult};
@@ -131,12 +132,34 @@ pub enum ClientSecurity {
 }
 
 
+/// Client authentication options
+pub struct ClientAuth {
+    /// Client username or login
+    pub username: String,
+    /// Client password
+    pub password: String,
+}
+
+impl ClientAuth {
+    pub fn new<S>(username: S, password: S) -> Self
+    where S: Into<String>
+    {
+        ClientAuth {
+            username: username.into(),
+            password: password.into(),
+        }
+    }
+}
+
+
 /// Parameters to use during the client handshake
 pub struct ClientParams {
     /// Client identifier, the parameter to `EHLO`
     pub id: ClientId,
     /// Whether to use a secure connection, and how
     pub security: ClientSecurity,
+    /// Authentication data
+    pub auth: Option<ClientAuth>,
 }
 
 
@@ -312,7 +335,7 @@ where T: AsyncWrite + 'static, TlsStream<T>: AsyncWrite + Write
 pub struct ClientProto(pub Arc<ClientParams>);
 
 // FIXME: Return opening response.
-fn handshake<T>(io: ClientIo<T>, params: Arc<ClientParams>, await_opening: bool) ->
+fn handshake<T>(io: ClientIo<T>, params: Arc<ClientParams>, await_opening: bool, do_auth: bool) ->
     Box<Future<Item = (Response, Framed<ClientIo<T>, ClientCodec>), Error = IoError>>
 where T: AsyncRead + AsyncWrite + 'static
 {
@@ -349,21 +372,112 @@ where T: AsyncRead + AsyncWrite + 'static
                 }
             })
         // Receive EHLO response.
-            .and_then(|stream| {
+            .and_then(move |stream| {
                 stream.into_future()
                     .map_err(|(err, _)| err)
-                    .and_then(|(response, stream)| {
+                    .and_then(move |(response, stream)| {
                         // Fail if closed.
                         let response = match response {
                             Some(Frame::Message { message, .. }) => message,
-                            _ => return future::err(IoError::new(
-                                IoErrorKind::InvalidData, "connection closed during handshake")),
+                            _ => return future::Either::B(future::err(IoError::new(
+                                IoErrorKind::InvalidData, "connection closed during handshake"))),
                         };
+
+                        if do_auth {
+                            return future::Either::A(future::Either::A(
+                                clientauth(stream, params, &response.text)
+                                    .and_then(|stream| {
+                                        future::ok((response, stream))
+                                    })))
+                        }
                         
-                        future::ok((response, stream))
+                        future::Either::A(future::Either::B(
+                            future::ok((response, stream))))
                     })
             })
     )
+}
+
+// TODO: Support more authentication mechanisms.
+fn clientauth<T>(stream: Framed<ClientIo<T>, ClientCodec>, params: Arc<ClientParams>, features: &Vec<String>) ->
+    Box<Future<Item = Framed<ClientIo<T>, ClientCodec>, Error = IoError>>
+where T: AsyncRead + AsyncWrite + 'static
+{
+    if let &None = &params.auth {
+        return Box::new(future::ok(stream))
+    }
+    
+    if let Some(ref auth_methods) = features.iter()
+        .find(|feature| feature.starts_with("AUTH "))
+        .map(|feature| feature.split_at(5).1.split(" "))
+    {
+        if let Some(_) = auth_methods.clone().find(|method| method == &"PLAIN") {
+            let authdata = if let Some(ClientAuth { ref username, ref password }) = params.auth {
+                base64::encode(&format!("{}\0{}\0{}", username, username, password))
+            } else { unreachable!(); };
+
+            // Send AUTH PLAIN request.
+            Box::new(stream.send(Request::Auth {
+                method: Some("PLAIN".into()),
+                data: Some(authdata),
+            }.into())
+                     // Await auth response.
+                     .and_then(|stream| stream.into_future().map_err(|(err, _)| err))
+                     .and_then(|(response, stream)| {
+                         let response = match response {
+                             Some(Frame::Message { message, .. }) => message,
+                             _ => return future::err(IoError::new(
+                                 IoErrorKind::InvalidData, "connection closed during auth")),
+                         };
+                         
+                         // Check auth status.
+                         if !response.code.severity.is_positive() {
+                             return future::err(IoError::new(
+                                 IoErrorKind::InvalidData, "authentication failed"));
+                         }
+                         
+                         future::ok(stream)
+                     }))
+        } else if let Some(_) = auth_methods.clone().find(|method| method == &"LOGIN") {
+            let (username, password) = if let Some(ref authdata) = params.auth {
+                (base64::encode(&authdata.username), base64::encode(&authdata.password))
+            } else { unreachable!(); };
+            
+            // Send AUTH LOGIN request.
+            Box::new(stream.send(Request::Auth {
+                method: Some("LOGIN".into()),
+                data: Some(username),
+            }.into())
+                     // Send password.
+                     .and_then(|stream| stream.send(Request::Auth {
+                         method: None,
+                         data: Some(password)
+                     }.into()))
+                     // Await auth response.
+                     .and_then(|stream| stream.into_future().map_err(|(err, _)| err))
+                     .and_then(|(response, stream)| {
+                         let response = match response {
+                             Some(Frame::Message { message, .. }) => message,
+                             _ => return future::err(IoError::new(
+                                 IoErrorKind::InvalidData, "connection closed during auth")),
+                         };
+                         
+                         // Check auth status.
+                         if !response.code.severity.is_positive() {
+                             return future::err(IoError::new(
+                                 IoErrorKind::InvalidData, "authentication failed"));
+                         }
+                         
+                         future::ok(stream)
+                     }))
+        } else {
+            Box::new(future::err(IoError::new(
+                IoErrorKind::InvalidData, "no supported auth methods found")))
+        }
+    } else {
+        Box::new(future::err(IoError::new(
+            IoErrorKind::InvalidData, "server does not support auth")))
+    }
 }
 
 impl ClientProto {
@@ -387,7 +501,7 @@ impl ClientProto {
     where T: AsyncRead + AsyncWrite + 'static
     {
         // Perform the handshake.
-        Box::new(handshake(ClientIo::Plain(io), params, true)
+        Box::new(handshake(ClientIo::Plain(io), params, true, true)
                  .map(|(_, stream)| stream))
     }
 
@@ -397,7 +511,7 @@ impl ClientProto {
         let is_required =
             if let ClientSecurity::Required(_) = params.security { true } else { false };
         // Perform the handshake, and send STARTTLS.
-        Box::new(handshake(ClientIo::Plain(io), params.clone(), true)
+        Box::new(handshake(ClientIo::Plain(io), params.clone(), true, false)
                  .and_then(move |(ehlo_response, stream)| {
                      let is_supported = None != ehlo_response.text.iter()
                          .find(|feature| feature.as_str() == "STARTTLS");
@@ -449,7 +563,7 @@ impl ClientProto {
                              }
                              .and_then(move |io| {
                                  // Re-do the handshake.
-                                 handshake(ClientIo::Secure(io), params, false)
+                                 handshake(ClientIo::Secure(io), params, false, true)
                                      .map(|(_, stream)| stream)
                              })
                          }))
@@ -471,7 +585,7 @@ impl ClientProto {
         }
             .and_then(move |io| {
                 // Perform the handshake.
-                handshake(ClientIo::Secure(io), params, true)
+                handshake(ClientIo::Secure(io), params, true, true)
                     .map(|(_, stream)| stream)
             }))
     }
@@ -502,39 +616,39 @@ pub struct Client;
 
 impl Client {
     /// Setup a client for connecting to the local server
-    pub fn localhost() -> TcpClient {
-        Self::insecure(ClientId::Domain("localhost".to_string()))
+    pub fn localhost(auth: Option<ClientAuth>) -> TcpClient {
+        Self::insecure(ClientId::Domain("localhost".to_string()), auth)
     }
 
     /// Setup a client for connecting without TLS
-    pub fn insecure(id: ClientId) -> TcpClient {
+    pub fn insecure(id: ClientId, auth: Option<ClientAuth>) -> TcpClient {
         Self::with_params(ClientParams {
             security: ClientSecurity::None,
-            id: id,
+            id, auth,
         })
     }
 
     /// Setup a client for connecting with TLS using STARTTLS
-    pub fn secure(id: ClientId, sni_domain: String) -> TlsResult<TcpClient> {
+    pub fn secure(id: ClientId, sni_domain: String, auth: Option<ClientAuth>) -> TlsResult<TcpClient> {
         Ok(Self::with_params(ClientParams {
             security: ClientSecurity::Required(ClientTlsParams {
                 connector: TlsConnector::builder()
                     .and_then(|builder| builder.build())?,
                 sni_domain: sni_domain,
             }),
-            id: id,
+            id, auth,
         }))
     }
 
     /// Setup a client for connecting with TLS on a secure port
-    pub fn secure_port(id: ClientId, sni_domain: String) -> TlsResult<TcpClient> {
+    pub fn secure_port(id: ClientId, sni_domain: String, auth: Option<ClientAuth>) -> TlsResult<TcpClient> {
         Ok(Self::with_params(ClientParams {
             security: ClientSecurity::Immediate(ClientTlsParams {
                 connector: TlsConnector::builder()
                     .and_then(|builder| builder.build())?,
                 sni_domain: sni_domain,
             }),
-            id: id,
+            id, auth,
         }))
     }
 
