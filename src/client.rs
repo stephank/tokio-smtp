@@ -311,9 +311,9 @@ where T: AsyncWrite + 'static, TlsStream<T>: AsyncWrite + Write
 /// Implements an SMTP client using a streaming pipeline protocol.
 pub struct ClientProto(pub Arc<ClientParams>);
 
-// FIXME: Return opening and ehlo responses.
+// FIXME: Return opening response.
 fn handshake<T>(io: ClientIo<T>, params: Arc<ClientParams>, await_opening: bool) ->
-    Box<Future<Item = Framed<ClientIo<T>, ClientCodec>, Error = IoError>>
+    Box<Future<Item = (Response, Framed<ClientIo<T>, ClientCodec>), Error = IoError>>
 where T: AsyncRead + AsyncWrite + 'static
 {
     Box::new(
@@ -330,9 +330,8 @@ where T: AsyncRead + AsyncWrite + 'static
                             // Fail if closed.
                             let response = match response {
                                 Some(Frame::Message { message, .. }) => message,
-                                None => return future::err(IoError::new(
+                                _ => return future::err(IoError::new(
                                     IoErrorKind::InvalidData, "connection closed before handshake")),
-                                _ => unreachable!(),
                             };
                             
                             // Ensure it likes us, and supports ESMTP.
@@ -353,15 +352,16 @@ where T: AsyncRead + AsyncWrite + 'static
             .and_then(|stream| {
                 stream.into_future()
                     .map_err(|(err, _)| err)
-            })
-            .and_then(|(response, stream)| {
-                // Fail if closed.
-                if response.is_none() {
-                    return future::err(IoError::new(
-                        IoErrorKind::InvalidData, "connection closed during handshake"))
-                }
-                
-                future::ok(stream)
+                    .and_then(|(response, stream)| {
+                        // Fail if closed.
+                        let response = match response {
+                            Some(Frame::Message { message, .. }) => message,
+                            _ => return future::err(IoError::new(
+                                IoErrorKind::InvalidData, "connection closed during handshake")),
+                        };
+                        
+                        future::ok((response, stream))
+                    })
             })
     )
 }
@@ -387,7 +387,8 @@ impl ClientProto {
     where T: AsyncRead + AsyncWrite + 'static
     {
         // Perform the handshake.
-        handshake(ClientIo::Plain(io), params, true)
+        Box::new(handshake(ClientIo::Plain(io), params, true)
+                 .map(|(_, stream)| stream))
     }
 
     fn connect_starttls<T>(io: T, params: Arc<ClientParams>) -> ClientBindTransport<T>
@@ -397,48 +398,61 @@ impl ClientProto {
             if let ClientSecurity::Required(_) = params.security { true } else { false };
         // Perform the handshake, and send STARTTLS.
         Box::new(handshake(ClientIo::Plain(io), params.clone(), true)
-                 .and_then(|stream| {
-                     stream.send(Request::StartTls.into())
-                 })
-                 // Receive STARTTLS response.
-                 .and_then(|stream| {
-                     stream.into_future()
-                         .map_err(|(err, _)| err)
-                 })
-                 .and_then(move |(response, stream)| {
-                     // Fail if closed.
-                     let response = match response {
-                         Some(Frame::Message { message, .. }) => message,
-                         None => return future::err(IoError::new(
-                             IoErrorKind::InvalidData, "connection closed before starttls")),
-                         _ => unreachable!(),
-                     };
+                 .and_then(move |(ehlo_response, stream)| {
+                     let is_supported = None != ehlo_response.text.iter()
+                         .find(|feature| feature.as_str() == "STARTTLS");
                      
-                     // Handle rejection.
-                     if !response.code.severity.is_positive() && is_required {
-                         return future::err(IoError::new(
-                             IoErrorKind::InvalidData, "starttls rejected"));
+                     if !is_supported {
+                         if is_required {
+                             return future::Either::B(future::Either::B(future::err(IoError::new(
+                                 IoErrorKind::InvalidData, "server doesn't support starttls"))));
+                         }
+                         
+                         return future::Either::B(future::Either::A(future::ok(stream)));
                      }
                      
-                     future::ok(stream)
-                 })
-                 .and_then(move |stream| {
-                     // Get the inner `Io` back, then start TLS on it.
-                     // The block is to ensure the lifetime of `params.
-                     {
-                         let io = stream.into_inner().unwrap_plain();
-                         let tls_params = match params.security {
-                             ClientSecurity::Optional(ref tls_params) |
-                             ClientSecurity::Required(ref tls_params) => tls_params,
-                             _ => panic!("bad params to connect_starttls"),
-                         };
-                         tls_params.connector.connect_async(&tls_params.sni_domain, io)
-                             .map_err(|err| IoError::new(IoErrorKind::Other, err))
-                     }
-                     .and_then(move |io| {
-                         // Re-do the handshake.
-                         handshake(ClientIo::Secure(io), params, false)
-                     })
+                     future::Either::A(stream.send(Request::StartTls.into())
+                     // Receive STARTTLS response.
+                         .and_then(|stream| {
+                             stream.into_future()
+                                 .map_err(|(err, _)| err)
+                         })
+                         .and_then(move |(response, stream)| {
+                             // Fail if closed.
+                             let response = match response {
+                                 Some(Frame::Message { message, .. }) => message,
+                                 None => return future::err(IoError::new(
+                                     IoErrorKind::InvalidData, "connection closed before starttls")),
+                                 _ => unreachable!(),
+                             };
+                             
+                             // Handle rejection.
+                             if !response.code.severity.is_positive() && is_required {
+                                 return future::err(IoError::new(
+                                     IoErrorKind::InvalidData, "starttls rejected"));
+                             }
+                             
+                             future::ok(stream)
+                         })
+                         .and_then(move |stream| {
+                             // Get the inner `Io` back, then start TLS on it.
+                             // The block is to ensure the lifetime of `params.
+                             {
+                                 let io = stream.into_inner().unwrap_plain();
+                                 let tls_params = match params.security {
+                                     ClientSecurity::Optional(ref tls_params) |
+                                     ClientSecurity::Required(ref tls_params) => tls_params,
+                                     _ => panic!("bad params to connect_starttls"),
+                                 };
+                                 tls_params.connector.connect_async(&tls_params.sni_domain, io)
+                                     .map_err(|err| IoError::new(IoErrorKind::Other, err))
+                             }
+                             .and_then(move |io| {
+                                 // Re-do the handshake.
+                                 handshake(ClientIo::Secure(io), params, false)
+                                     .map(|(_, stream)| stream)
+                             })
+                         }))
                  }))
     }
 
@@ -458,6 +472,7 @@ impl ClientProto {
             .and_then(move |io| {
                 // Perform the handshake.
                 handshake(ClientIo::Secure(io), params, true)
+                    .map(|(_, stream)| stream)
             }))
     }
 }
