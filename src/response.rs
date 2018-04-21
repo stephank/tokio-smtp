@@ -210,7 +210,7 @@ impl Display for Response {
         let last_idx = self.text.len() - 1;
         for (i, line) in self.text.iter().enumerate() {
             let delim = if i == last_idx { ' ' } else { '-' };
-            write!(f, "{}{}{}\r\n", &self.code, delim, line)?
+            writeln!(f, "{}{}{}\r", &self.code, delim, line)?
         }
         Ok(())
     }
@@ -223,7 +223,7 @@ impl Display for Response {
 // within the nom macros. But perhaps this is a bug?
 
 fn parse_severity(input: &[u8]) -> NomResult<&[u8], Severity> {
-    if input.len() == 0 {
+    if input.is_empty() {
         return NomResult::Incomplete(Needed::Size(1));
     }
 
@@ -239,7 +239,7 @@ fn parse_severity(input: &[u8]) -> NomResult<&[u8], Severity> {
 }
 
 fn parse_category(input: &[u8]) -> NomResult<&[u8], Category> {
-    if input.len() == 0 {
+    if input.is_empty() {
         return NomResult::Incomplete(Needed::Size(1));
     }
 
@@ -257,7 +257,7 @@ fn parse_category(input: &[u8]) -> NomResult<&[u8], Category> {
 }
 
 fn parse_detail(input: &[u8]) -> NomResult<&[u8], Detail> {
-    if input.len() == 0 {
+    if input.is_empty() {
         return NomResult::Incomplete(Needed::Size(1));
     }
 
@@ -274,9 +274,9 @@ named!(parse_code<Code>,
         tuple!(parse_severity, parse_category, parse_detail),
         |(severity, category, detail)| {
             Code {
-                severity: severity,
-                category: category,
-                detail: detail,
+                severity,
+                category,
+                detail,
             }
         }
     )

@@ -149,17 +149,17 @@ pub enum Request {
 impl Display for Request {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match *self {
-            Request::Ehlo(ref id) => write!(f, "EHLO {}\r\n", id),
-            Request::StartTls => write!(f, "STARTTLS\r\n"),
+            Request::Ehlo(ref id) => writeln!(f, "EHLO {}\r", id),
+            Request::StartTls => f.write_str("STARTTLS\r\n"),
             Request::Auth { ref method, ref data } => {
                 match (method, data) {
                     (&Some(ref method), &Some(ref data)) =>
-                        write!(f, "AUTH {} {}\r\n", method, data),
+                        writeln!(f, "AUTH {} {}\r", method, data),
                     (&Some(ref method), &None) =>
-                        write!(f, "AUTH {}\r\n", method),
+                        writeln!(f, "AUTH {}\r", method),
                     (&None, &Some(ref data)) =>
-                        write!(f, "{}\r\n", data),
-                    _ => Ok(()),
+                        writeln!(f, "{}\r", data),
+                    _ => unreachable!(),
                 }
             },
             Request::Mail { ref from, ref params } => {

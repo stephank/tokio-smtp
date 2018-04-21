@@ -204,14 +204,14 @@ impl MailerBuilder {
     pub fn build(self) -> IoResult<Mailer> {
         let addrs = self.server.to_socket_addrs()?.collect();
         Ok(Mailer(Arc::new(MailerParams {
-            addrs: addrs,
+            addrs,
             params: Arc::new(ClientParams {
                 id: self.client_id,
                 auth: self.client_auth,
                 security: match self.tls_connector {
                     None => ClientSecurity::None,
                     Some(connector) => ClientSecurity::Required(ClientTlsParams {
-                        connector: connector,
+                        connector,
                         sni_domain: self.server.rsplitn(2, ':')
                             .nth(1).unwrap().to_string(),
                     }),

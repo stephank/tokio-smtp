@@ -322,9 +322,9 @@ impl<T> AsyncWrite for ClientIo<T>
 where T: AsyncWrite + 'static, TlsStream<T>: AsyncWrite + Write
 {
     fn shutdown(&mut self) -> Poll<(), IoError> {
-        match self {
-            &mut ClientIo::Plain(ref mut t) => t.shutdown(),
-            &mut ClientIo::Secure(ref mut t) => t.shutdown(),
+        match *self {
+            ClientIo::Plain(ref mut t) => t.shutdown(),
+            ClientIo::Secure(ref mut t) => t.shutdown(),
         }
     }
 }
@@ -334,9 +334,11 @@ where T: AsyncWrite + 'static, TlsStream<T>: AsyncWrite + Write
 /// Implements an SMTP client using a streaming pipeline protocol.
 pub struct ClientProto(pub Arc<ClientParams>);
 
+type HandshakeItem<T> = (Response, Framed<ClientIo<T>, ClientCodec>);
+
 // FIXME: Return opening response.
 fn handshake<T>(io: ClientIo<T>, params: Arc<ClientParams>, await_opening: bool, do_auth: bool) ->
-    Box<Future<Item = (Response, Framed<ClientIo<T>, ClientCodec>), Error = IoError>>
+    Box<Future<Item = HandshakeItem<T>, Error = IoError>>
 where T: AsyncRead + AsyncWrite + 'static
 {
     Box::new(
@@ -385,7 +387,7 @@ where T: AsyncRead + AsyncWrite + 'static
 
                         if do_auth {
                             return future::Either::A(future::Either::A(
-                                clientauth(stream, params, &response.text)
+                                clientauth(stream, &params, &response.text)
                                     .and_then(|stream| {
                                         future::ok((response, stream))
                                     })))
@@ -399,19 +401,19 @@ where T: AsyncRead + AsyncWrite + 'static
 }
 
 // TODO: Support more authentication mechanisms.
-fn clientauth<T>(stream: Framed<ClientIo<T>, ClientCodec>, params: Arc<ClientParams>, features: &Vec<String>) ->
+fn clientauth<T>(stream: Framed<ClientIo<T>, ClientCodec>, params: &ClientParams, features: &[String]) ->
     Box<Future<Item = Framed<ClientIo<T>, ClientCodec>, Error = IoError>>
 where T: AsyncRead + AsyncWrite + 'static
 {
-    if let &None = &params.auth {
+    if params.auth.is_none() {
         return Box::new(future::ok(stream))
     }
     
     if let Some(ref auth_methods) = features.iter()
         .find(|feature| feature.starts_with("AUTH "))
-        .map(|feature| feature.split_at(5).1.split(" "))
+        .map(|feature| feature.split_at(5).1.split(' '))
     {
-        if let Some(_) = auth_methods.clone().find(|method| method == &"PLAIN") {
+        if auth_methods.clone().any(|method| method == "PLAIN") {
             let authdata = if let Some(ClientAuth { ref username, ref password }) = params.auth {
                 base64::encode(&format!("{}\0{}\0{}", username, username, password))
             } else { unreachable!(); };
@@ -438,7 +440,7 @@ where T: AsyncRead + AsyncWrite + 'static
                          
                          future::ok(stream)
                      }))
-        } else if let Some(_) = auth_methods.clone().find(|method| method == &"LOGIN") {
+        } else if auth_methods.clone().any(|method| method == "LOGIN") {
             let (username, password) = if let Some(ref authdata) = params.auth {
                 (base64::encode(&authdata.username), base64::encode(&authdata.password))
             } else { unreachable!(); };
@@ -634,7 +636,7 @@ impl Client {
             security: ClientSecurity::Required(ClientTlsParams {
                 connector: TlsConnector::builder()
                     .and_then(|builder| builder.build())?,
-                sni_domain: sni_domain,
+                sni_domain,
             }),
             id, auth,
         }))
@@ -646,7 +648,7 @@ impl Client {
             security: ClientSecurity::Immediate(ClientTlsParams {
                 connector: TlsConnector::builder()
                     .and_then(|builder| builder.build())?,
-                sni_domain: sni_domain,
+                sni_domain,
             }),
             id, auth,
         }))
