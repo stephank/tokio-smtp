@@ -225,7 +225,7 @@ impl Encoder for ClientCodec {
 impl Decoder for ClientCodec {
     type Item = Frame<Response, (), IoError>;
     type Error = IoError;
-    
+
     fn decode(&mut self, buf: &mut BytesMut) -> IoResult<Option<Self::Item>> {
         let mut bytes: usize = 0;
 
@@ -358,7 +358,7 @@ where T: AsyncRead + AsyncWrite + 'static
                                 _ => return future::err(IoError::new(
                                     IoErrorKind::InvalidData, "connection closed before handshake")),
                             };
-                            
+
                             // Ensure it likes us, and supports ESMTP.
                             let esmtp = response.text.get(0)
                                 .and_then(|line| line.split_whitespace().nth(1));
@@ -366,7 +366,7 @@ where T: AsyncRead + AsyncWrite + 'static
                                 return future::err(IoError::new(
                                     IoErrorKind::InvalidData, "invalid handshake"));
                             }
-                            
+
                             future::ok(stream)
                         }))
                 } else {
@@ -392,7 +392,7 @@ where T: AsyncRead + AsyncWrite + 'static
                                         future::ok((response, stream))
                                     })))
                         }
-                        
+
                         future::Either::A(future::Either::B(
                             future::ok((response, stream))))
                     })
@@ -408,7 +408,7 @@ where T: AsyncRead + AsyncWrite + 'static
     if params.auth.is_none() {
         return Box::new(future::ok(stream))
     }
-    
+
     if let Some(ref auth_methods) = features.iter()
         .find(|feature| feature.starts_with("AUTH "))
         .map(|feature| feature.split_at(5).1.split(' '))
@@ -431,20 +431,20 @@ where T: AsyncRead + AsyncWrite + 'static
                              _ => return future::err(IoError::new(
                                  IoErrorKind::InvalidData, "connection closed during auth")),
                          };
-                         
+
                          // Check auth status.
                          if !response.code.severity.is_positive() {
                              return future::err(IoError::new(
                                  IoErrorKind::InvalidData, "authentication failed"));
                          }
-                         
+
                          future::ok(stream)
                      }))
         } else if auth_methods.clone().any(|method| method == "LOGIN") {
             let (username, password) = if let Some(ref authdata) = params.auth {
                 (base64::encode(&authdata.username), base64::encode(&authdata.password))
             } else { unreachable!(); };
-            
+
             // Send AUTH LOGIN request.
             Box::new(stream.send(Request::Auth {
                 method: Some("LOGIN".into()),
@@ -463,13 +463,13 @@ where T: AsyncRead + AsyncWrite + 'static
                              _ => return future::err(IoError::new(
                                  IoErrorKind::InvalidData, "connection closed during auth")),
                          };
-                         
+
                          // Check auth status.
                          if !response.code.severity.is_positive() {
                              return future::err(IoError::new(
                                  IoErrorKind::InvalidData, "authentication failed"));
                          }
-                         
+
                          future::ok(stream)
                      }))
         } else {
@@ -517,16 +517,16 @@ impl ClientProto {
                  .and_then(move |(ehlo_response, stream)| {
                      let is_supported = None != ehlo_response.text.iter()
                          .find(|feature| feature.as_str() == "STARTTLS");
-                     
+
                      if !is_supported {
                          if is_required {
                              return future::Either::B(future::Either::B(future::err(IoError::new(
                                  IoErrorKind::InvalidData, "server doesn't support starttls"))));
                          }
-                         
+
                          return future::Either::B(future::Either::A(future::ok(stream)));
                      }
-                     
+
                      future::Either::A(stream.send(Request::StartTls.into())
                      // Receive STARTTLS response.
                          .and_then(|stream| {
@@ -541,13 +541,13 @@ impl ClientProto {
                                      IoErrorKind::InvalidData, "connection closed before starttls")),
                                  _ => unreachable!(),
                              };
-                             
+
                              // Handle rejection.
                              if !response.code.severity.is_positive() && is_required {
                                  return future::err(IoError::new(
                                      IoErrorKind::InvalidData, "starttls rejected"));
                              }
-                             
+
                              future::ok(stream)
                          })
                          .and_then(move |stream| {
